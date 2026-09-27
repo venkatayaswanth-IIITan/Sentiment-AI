@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  database:
+    image: postgres:15-alpine
+    container_name: brandpulse_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-brandpulse_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-brandpulse_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-brandpulse_db}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - brandpulse-network
+
+  ml-service:
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile
+    container_name: brandpulse_ml_service
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - ARTIFACTS_DIR=/app/artifacts
+    volumes:
+      - ./ml-service/artifacts:/app/artifacts
+    networks:
+      - brandpulse-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: brandpulse_backend
+    restart: unless-stopped
+    ports:
+      - "${PORT:-5000}:5000"
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-brandpulse_user}:${POSTGRES_PASSWORD:-brandpulse_secret}@database:5432/${POSTGRES_DB:-brandpulse_db}?schema=public
+      - ML_SERVICE_URL=http://ml-service:8000
+    depends_on:
+      - database
+      - ml-service
+    networks:
+      - brandpulse-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: brandpulse_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - brandpulse-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  brandpulse-network:
+    driver: bridge
